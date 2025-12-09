@@ -1,11 +1,13 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+// src/commands/economia/items/itemdelete.js
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const safeReply = require("@src/utils/safeReply.js");
-const Item = require("@database/mongodb"); // Importamos el modelo
+const { Item } = require("@src/database/mongodb.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('itemdelete')
         .setDescription('Eliminar un item de la tienda de forma permanente.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(option => 
             option.setName('nombre')
                 .setDescription('Nombre del item a eliminar')
@@ -18,7 +20,6 @@ module.exports = {
         const nombreItem = interaction.options.getString('nombre');
 
         try {
-            // Buscamos y borramos (Case insensitive)
             const deletedItem = await Item.findOneAndDelete({ 
                 itemName: { $regex: new RegExp(`^${nombreItem}$`, 'i') },
                 guildId: interaction.guild.id
@@ -32,7 +33,7 @@ module.exports = {
 
             const embed = new EmbedBuilder()
                 .setTitle('🗑️ Item Eliminado')
-                .setDescription(`El item **${deletedItem.itemName}** ha sido eliminado de la tienda correctamente.`)
+                .setDescription(`El item **${deletedItem.itemName}** fue eliminado correctamente.`)
                 .setColor('#e74c3c')
                 .setFooter({ text: `ID: ${deletedItem._id}` })
                 .setTimestamp();
@@ -40,8 +41,8 @@ module.exports = {
             await safeReply(interaction, { embeds: [embed] });
 
         } catch (err) {
-            console.error('❌ ERROR EN COMANDO itemdelete.js:', err);
-            await safeReply(interaction, { content: '❌ Ocurrió un error al intentar eliminar el item.' });
+            console.error('❌ ERROR EN itemdelete:', err);
+            await safeReply(interaction, { content: '❌ Error al intentar eliminar el item.' });
         }
     }
 };

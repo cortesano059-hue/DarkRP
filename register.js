@@ -1,37 +1,62 @@
-// src/register.js
-const { REST, Routes } = require('discord.js');
-const fs = require('fs');
-require('dotenv').config();
+const { REST, Routes } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
 
 module.exports = async (client) => {
-    // Inicializar colecciones si no existen
-    client.commands ??= new Map();
-    client.commandArray ??= [];
 
-    // Cargar todos los comandos
-    const commandFiles = fs.readdirSync('./src/commands').filter(file => file.endsWith('.js'));
-    for (const file of commandFiles) {
-        const command = require(`./commands/${file}`); // usa ruta relativa si @commands falla
-        if (command.data) {
-            client.commands.set(command.data.name, command);
-            client.commandArray.push(command.data.toJSON());
+    const commands = [];
+    const commandsPath = path.join(__dirname, "src", "commands"); 
+    // 🔥 Ruta corregida → apunta a /src/commands
+
+    // Función recursiva para leer subcarpetas
+    function loadCommands(dir) {
+        if (!fs.existsSync(dir)) return; // evita crashear si no existe
+
+        const files = fs.readdirSync(dir);
+
+        for (const file of files) {
+            const fullPath = path.join(dir, file);
+
+            if (fs.lstatSync(fullPath).isDirectory()) {
+                loadCommands(fullPath);
+                continue;
+            }
+
+            if (!file.endsWith(".js")) continue;
+
+            const command = require(fullPath);
+
+            if (command?.data) {
+                commands.push(command.data.toJSON());
+                client.commands.set(command.data.name, command);
+            }
         }
     }
 
-    // Registrar comandos solo cuando el cliente esté listo
-    client.once('ready', async () => {
-        console.log(`${client.user.tag} está listo. Registrando comandos...`);
+    // Cargar TODOS los comandos
+    loadCommands(commandsPath);
 
-        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    console.log(`📦 Comandos cargados: ${commands.length}`);
+
+    // Registrar cuando esté listo
+    client.once("ready", async () => {
+        console.log(`🛰 Registrando comandos como ${client.user.tag}...`);
+
+        const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
         try {
             await rest.put(
-                Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-                { body: client.commandArray }
+                Routes.applicationGuildCommands(
+                    process.env.CLIENT_ID,
+                    process.env.GUILD_ID
+                ),
+                { body: commands }
             );
-            console.log('✅ Comandos registrados correctamente.');
-        } catch (error) {
-            console.error('❌ Error al registrar comandos:', error);
+
+            console.log("✅ Comandos registrados con éxito.");
+        } catch (e) {
+            console.error("❌ Error al registrar comandos:", e);
         }
     });
 };

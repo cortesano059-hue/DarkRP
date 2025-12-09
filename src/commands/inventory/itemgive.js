@@ -1,52 +1,41 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-try {
-    const safeReply = require("@src/utils/safeReply.js");
-    const eco = require('@economy'); // Usamos el helper de economía
+// src/commands/economia/items/giveitem.js
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const safeReply = require("@src/utils/safeReply.js");
+const eco = require('@economy');
 
-    module.exports = {
-        data: new SlashCommandBuilder()
-            .setName('giveitem')
-            .setDescription('Da un item a un usuario')
-            .addUserOption(o => o.setName('usuario').setDescription('Usuario receptor').setRequired(true))
-            .addStringOption(o => o.setName('item').setDescription('Nombre del item').setRequired(true))
-            .addIntegerOption(o => o.setName('cantidad').setDescription('Cantidad a dar').setRequired(false)),
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('giveitem')
+        .setDescription('Da un item a un usuario')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addUserOption(o => o.setName('usuario').setDescription('Usuario receptor').setRequired(true))
+        .addStringOption(o => o.setName('item').setDescription('Nombre del item').setRequired(true))
+        .addIntegerOption(o => o.setName('cantidad').setDescription('Cantidad a dar')),
 
-        async execute(interaction) {
-            await interaction.deferReply({ });
-            try {
-                const user = interaction.options.getUser('usuario');
-                const itemName = interaction.options.getString('item');
-                let quantity = interaction.options.getInteger('cantidad') || 1;
+    async execute(interaction) {
+        await interaction.deferReply();
 
-                if (quantity <= 0) quantity = 1;
+        const user = interaction.options.getUser('usuario');
+        const itemName = interaction.options.getString('item');
+        let quantity = interaction.options.getInteger('cantidad') || 1;
 
-                // 1. Buscar item usando nuestra función de economy.js
-                const item = await eco.getItemByName(interaction.guild.id, itemName);
-                
-                if (!item) {
-                    return await safeReply(interaction, { content: `❌ Item "${itemName}" no encontrado en la tienda.` });
-                }
+        try {
+            const item = await eco.getItemByName(interaction.guild.id, itemName);
+            if (!item)
+                return safeReply(interaction, `❌ Item "${itemName}" no encontrado.`);
 
-                // 2. Dar item al inventario
-                await eco.addToInventory(user.id, interaction.guild.id, item._id, quantity);
+            await eco.addToInventory(user.id, interaction.guild.id, item._id, quantity);
 
-                const embed = new EmbedBuilder()
-                    .setTitle('🎁 Item Entregado')
-                    .setDescription(`Has dado a **${user.username}** **${quantity}x ${item.itemName}**.`)
-                    .setColor('#2ecc71')
-                    // Si tienes campo de imagen en 'data', úsalo, si no, null
-                    .setThumbnail(item.data?.image || null) 
-                    .setFooter({ text: `ID del Item: ${item._id}` });
+            const embed = new EmbedBuilder()
+                .setTitle('🎁 Item Entregado')
+                .setDescription(`Has dado **${quantity}x ${item.itemName}** a **${user.username}**.`)
+                .setColor('#2ecc71');
 
-                return await safeReply(interaction, { embeds: [embed] });
+            return safeReply(interaction, { embeds: [embed] });
 
-            } catch (err) {
-                console.error('❌ ERROR EN COMANDO giveitem.js:', err);
-                return await safeReply(interaction, { content: '❌ Ocurrió un error al dar el item.' });
-            }
+        } catch (err) {
+            console.error("❌ ERROR giveitem:", err);
+            return safeReply(interaction, "❌ Error al dar el item.");
         }
-    };
-
-} catch(e) {
-    console.error('❌ ERROR EN COMANDO giveitem.js:', e);
-}
+    }
+};

@@ -5,7 +5,7 @@ const {
 } = require("discord.js");
 
 const safeReply = require("@src/utils/safeReply.js");
-const Backpack = require("@database/mongodb");
+const { Backpack } = require("@database/mongodb");
 const eco = require("@economy");
 
 const escapeRegex = require("@src/utils/escapeRegex.js");

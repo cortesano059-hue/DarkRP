@@ -1,5 +1,5 @@
 // src/commands/economia/items/itemcreate.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const safeReply = require("@safeReply");
 const eco = require("@economy");
 
@@ -7,6 +7,7 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('itemcreate')
         .setDescription('Crea un nuevo item en la tienda')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(o =>
             o.setName('name').setDescription('Nombre del item').setRequired(true)
         )

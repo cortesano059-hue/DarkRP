@@ -1,5 +1,5 @@
 // src/handlers/backpackAutocomplete.js
-const Backpack = require("@database/mongodb");
+const { Backpack } = require("@database/mongodb");
 const eco = require("@economy");
 const { isAdmin, canAccessBackpack } = require("@src/utils/backpackAccess.js");
 const escapeRegex = require("@src/utils/escapeRegex.js");

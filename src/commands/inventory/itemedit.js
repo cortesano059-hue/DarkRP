@@ -1,12 +1,13 @@
 // src/commands/economia/items/itemedit.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const safeReply = require("@safeReply");
-const Item = require("@database/mongodb");
+const { Item } = require("@src/database/mongodb.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('itemedit')
         .setDescription('Edita un item de la tienda')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(o =>
             o.setName('nombre').setDescription('Item a editar').setRequired(true)
         )
