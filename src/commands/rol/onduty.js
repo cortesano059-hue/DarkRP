@@ -2,58 +2,76 @@
 const { SlashCommandBuilder } = require("discord.js");
 const safeReply = require("@src/utils/safeReply.js");
 const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-const { DutyStatus, IncomeRole } = require("@src/database/mongodb.js");
+const logger = require("@src/utils/logger.js");
+
+const { DutyStatus, IncomeRole, User } = require("@src/database/mongodb.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName("onduty")
-        .setDescription("Entrar en servicio y comenzar a generar salario."),
+        .setDescription("Ponte en servicio y empieza a generar ingresos."),
 
     async execute(interaction) {
-        const user = interaction.user;
-        const member = await interaction.guild.members.fetch(user.id);
         const guildId = interaction.guild.id;
-        const channelId = interaction.channel.id;
+        const userId = interaction.user.id;
 
-        if (await DutyStatus.findOne({ userId: user.id, guildId })) {
-            return safeReply(interaction, "❌ Ya estás en servicio.");
+        await interaction.deferReply({ ephemeral: false });
+
+        // Ver si ya está en servicio
+        const existing = await DutyStatus.findOne({ userId, guildId });
+        if (existing) {
+            return safeReply(interaction, {
+                embeds: [
+                    new ThemedEmbed(interaction)
+                        .setTitle("⚠️ Ya estás en servicio")
+                        .setDescription("Debes usar `/offduty` antes de volver a entrar.")
+                        .setColor("#f1c40f")
+                ]
+            });
         }
 
-        const rolesWithIncome = await IncomeRole.find({ guildId });
-        const valid = rolesWithIncome.filter(r => member.roles.cache.has(r.roleId));
+        // Obtener roles configurados
+        const incomes = await IncomeRole.find({ guildId });
 
-        if (valid.length === 0) {
-            return safeReply(interaction, "❌ No tienes roles con sueldo configurado.");
+        if (!incomes.length) {
+            return safeReply(interaction, {
+                content: "⚠️ No hay roles de salario configurados. Usa `/setincome` primero."
+            });
         }
 
-        const selected = valid
-            .map(r => ({
-                roleId: r.roleId,
-                incomePerHour: r.incomePerHour,
-                position: member.guild.roles.cache.get(r.roleId).position
-            }))
-            .sort((a, b) => b.position - a.position)[0];
+        // Buscar roles que tenga el usuario y que tengan income configurado
+        const member = await interaction.guild.members.fetch(userId);
 
+        const validRoles = incomes.filter(inc => member.roles.cache.has(inc.roleId));
+
+        if (!validRoles.length) {
+            return safeReply(interaction, {
+                content: "❌ No tienes ningún rol con salario configurado."
+            });
+        }
+
+        // Escoger el rol con el mayor salario
+        const selectedRole = validRoles.sort((a, b) => b.incomePerHour - a.incomePerHour)[0];
+
+        // Guardar el estado DUTY
         await DutyStatus.create({
-            userId: user.id,
+            userId,
             guildId,
-            roleId: selected.roleId,
-            incomePerHour: selected.incomePerHour,
-            channelId,
-            startTime: Date.now(),
-            lastPayment: Date.now()
+            roleId: selectedRole.roleId,
+            startTime: new Date()
         });
 
         const embed = new ThemedEmbed(interaction)
-            .setTitle("🟢 En Servicio")
+            .setTitle("🟢 Servicio iniciado")
             .setDescription(
-                `Has entrado en servicio.\n` +
-                `💼 Rol: <@&${selected.roleId}>\n` +
-                `💸 Sueldo: **$${selected.incomePerHour}/h**\n\n` +
-                `El pago se realizará automáticamente cada **1 hora**.\n` +
-                `Si sales antes, recibirás el pago proporcional.`
-            );
+                `Has entrado en servicio como <@&${selectedRole.roleId}>.\n\n` +
+                `**Salario:** $${selectedRole.incomePerHour}/hora`
+            )
+            .setColor("#2ecc71");
 
-        safeReply(interaction, { embeds: [embed] });
+        await safeReply(interaction, { embeds: [embed] });
+
+        logger.info(`${interaction.user.tag} ha iniciado servicio.`, "Duty");
+
     }
 };

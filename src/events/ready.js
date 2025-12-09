@@ -1,80 +1,83 @@
 // src/events/ready.js
-const { Events, REST, Routes } = require("discord.js");
+const { Events } = require("discord.js");
 const logger = require("@src/utils/logger.js");
 const { DutyStatus, IncomeRole, User } = require("@src/database/mongodb.js");
 const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
 
 module.exports = {
-  name: Events.ClientReady,
-  once: true,
+    name: Events.ClientReady,
+    once: true,
 
-  async execute(client) {
-    console.log(`🤖 Logged in as ${client.user.tag}`);
-    logger.info(`Bot conectado como ${client.user.tag}`);
+    async execute(client) {
+        console.log(`🤖 Logged in as ${client.user.tag}`);
+        logger.info(`Bot conectado como ${client.user.tag}`);
 
-    const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
+        // ----------------------------------------
+        // 🔄 CONTROL DE PAGO AUTOMÁTICO CADA 1 MINUTO
+        // ----------------------------------------
+        setInterval(async () => {
+            try {
+                const activeUsers = await DutyStatus.find();
 
-    try {
-      await rest.put(
-        Routes.applicationCommands(client.user.id),
-        { body: client.commandsArray }
-      );
-      logger.info("✅ Comandos registrados correctamente.");
-    } catch (err) {
-      logger.error("Error al registrar comandos:", err);
-    }
+                for (const duty of activeUsers) {
+                    const { userId, guildId, roleId, startTime, channelId } = duty;
 
-    /* ===============================================
-       🔥 SISTEMA DE SUELDOS AUTOMÁTICOS — CADA 1 MIN
-    ================================================ */
-    setInterval(async () => {
-      const now = Date.now();
-      const activeUsers = await DutyStatus.find({});
+                    const guild = client.guilds.cache.get(guildId);
+                    if (!guild) continue;
 
-      for (const duty of activeUsers) {
-        const incomeRole = await IncomeRole.findOne({
-          guildId: duty.guildId,
-          roleId: duty.roleId,
-        });
+                    const member = guild.members.cache.get(userId);
+                    if (!member) continue;
 
-        if (!incomeRole) continue;
-        
-        const channel = client.channels.cache.get(duty.channelId);
-        if (!channel) continue;
+                    const income = await IncomeRole.findOne({ guildId, roleId });
+                    if (!income) continue;
 
-        const minutesWorked = (now - duty.startTime) / 60000;
-        if (minutesWorked < 10) continue; // mínimo 10 minutos
+                    const now = Date.now();
+                    const elapsed = now - startTime.getTime();
 
-        const minutesSincePayment =
-          duty.lastPayment === 0
-            ? minutesWorked
-            : (now - duty.lastPayment) / 60000;
+                    // ❌ Si no hay al menos 1 hora trabajada, no pagar aún
+                    if (elapsed < 3600000) continue;
 
-        if (minutesSincePayment < 1) continue;
+                    // ✔ Calcular horas completas
+                    const hours = Math.floor(elapsed / 3600000);
+                    const amount = hours * income.incomePerHour;
 
-        const hourly = incomeRole.incomePerHour;
-        const toPay = Math.floor((hourly / 60) * minutesSincePayment);
+                    // ✔ Pagar al banco
+                    const userDB = await User.findOneAndUpdate(
+                        { userId, guildId },
+                        { $inc: { bank: amount } },
+                        { new: true }
+                    );
 
-        if (toPay <= 0) continue;
+                    // ✔ Reiniciar contador del servicio
+                    duty.startTime = new Date(now);
+                    await duty.save();
 
-        await User.updateOne(
-          { userId: duty.userId, guildId: duty.guildId },
-          { $inc: { money: toPay } }
-        );
+                    // ✔ Enviar embed al canal donde hizo /onduty
+                    const channel = guild.channels.cache.get(channelId);
+                    if (channel) {
+                        const embed = new ThemedEmbed()
+                            .setTitle("💼 Pago Automático por Servicio")
+                            .setDescription(
+                                `<@${userId}> has recibido **$${amount}** por **${hours} hora(s)** trabajadas.\n\n` +
+                                `**Rol:** <@&${roleId}>\n` +
+                                `**Balance Actual (Banco):** $${userDB.bank}`
+                            )
+                            .setColor("#2ecc71");
 
-        duty.lastPayment = now;
-        await duty.save();
+                        channel.send({ embeds: [embed] }).catch(() => {});
+                    }
 
-        const embed = new ThemedEmbed()
-          .setTitle("💸 Pago por Servicio")
-          .setDescription(
-            `Has recibido **$${toPay}** por estar en servicio durante **${minutesSincePayment.toFixed(
-              1
-            )} minutos**.\n\n¡Sigue trabajando!`
-          );
+                    logger.info(
+                        `PAGO HORARIO AUTO: ${member.user.tag} → $${amount} por ${hours}h`,
+                        "Duty-AutoPay"
+                    );
+                }
 
-        channel.send({ content: `<@${duty.userId}>`, embeds: [embed] });
-      }
-    }, 60_000); // 1 minuto
-  },
+            } catch (err) {
+                logger.error("❌ Error en el sistema de auto-pago:", err);
+            }
+        }, 60 * 1000); // Revisa cada 1 minuto
+
+        logger.info("⏱️ Sistema automático de pago por horas iniciado.");
+    },
 };
