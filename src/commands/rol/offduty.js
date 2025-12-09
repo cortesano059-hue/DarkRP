@@ -1,88 +1,60 @@
-// src/commands/rol/offduty.js
 const { SlashCommandBuilder } = require("discord.js");
-const safeReply = require("@src/utils/safeReply.js");
-const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-const logger = require("@src/utils/logger.js");
-
 const { DutyStatus, IncomeRole, User } = require("@src/database/mongodb.js");
+const safeReply = require("@src/utils/safeReply.js");
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName("offduty")
-        .setDescription("Sal del servicio y recibe tu paga correspondiente."),
+  data: new SlashCommandBuilder()
+    .setName("offduty")
+    .setDescription("Salir de servicio y recibir el pago del tiempo trabajado."),
 
-    async execute(interaction) {
-        const guildId = interaction.guild.id;
-        const userId = interaction.user.id;
+  async execute(interaction) {
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
 
-        await interaction.deferReply({ ephemeral: false });
+    const status = await DutyStatus.findOne({ userId, guildId });
+    if (!status) return safeReply(interaction, "❌ No estabas en servicio.");
 
-        const duty = await DutyStatus.findOne({ userId, guildId });
+    const now = new Date();
+    const msWorked = now - status.startTime;
+    const minutes = Math.floor(msWorked / 60000);
 
-        if (!duty) {
-            return safeReply(interaction, {
-                embeds: [
-                    new ThemedEmbed(interaction)
-                        .setTitle("⚠️ No estabas en servicio")
-                        .setColor("#e67e22")
-                ]
-            });
-        }
-
-        const now = Date.now();
-        const start = duty.startTime.getTime();
-        const diffMs = now - start;
-
-        if (diffMs < 10 * 60 * 1000) {
-            return safeReply(interaction, {
-                content: "❌ Debes haber trabajado al menos **10 minutos** para recibir salario."
-            });
-        }
-
-        const diffHours = diffMs / (1000 * 60 * 60);
-
-        const roleIncome = await IncomeRole.findOne({
-            guildId,
-            roleId: duty.roleId
-        });
-
-        if (!roleIncome) {
-            return safeReply(interaction, {
-                content: "⚠️ Error: el rol ya no tiene salario configurado."
-            });
-        }
-
-        const hourlyPay = roleIncome.incomePerHour;
-        const amountEarned = Math.floor(diffHours * hourlyPay);
-
-        // Ingresar al banco
-        const user = await User.findOneAndUpdate(
-            { userId, guildId },
-            { $inc: { bank: amountEarned } },
-            { new: true }
-        );
-
-        // Borrar estado de servicio
-        await DutyStatus.deleteOne({ userId, guildId });
-
-        const minutes = Math.floor(diffMs / 60000);
-        const hours = (minutes / 60).toFixed(2);
-
-        const embed = new ThemedEmbed(interaction)
-            .setTitle("🔴 Servicio finalizado")
-            .setDescription(
-                `Has salido del servicio como <@&${roleIncome.roleId}>.\n\n` +
-                `**Tiempo trabajado:** ${minutes} minutos (${hours}h)\n` +
-                `**Salario recibido:** $${amountEarned}\n` +
-                `**Balance actual en banco:** $${user.bank}`
-            )
-            .setColor("#e74c3c");
-
-        await safeReply(interaction, { embeds: [embed] });
-
-        logger.info(
-            `${interaction.user.tag} salió del servicio y ganó $${amountEarned}`,
-            "Duty"
-        );
+    // Pago mínimo: 10 min
+    if (minutes < 10) {
+      await DutyStatus.deleteOne({ userId, guildId });
+      return safeReply(interaction, "⏱️ Estuviste menos de 10 minutos. No recibes pago.");
     }
+
+    const incomeRole = await IncomeRole.findOne({
+      guildId,
+      roleId: status.roleId,
+    });
+
+    if (!incomeRole) {
+      await DutyStatus.deleteOne({ userId, guildId });
+      return safeReply(interaction, "⚠️ Tu rol ya no tiene salario configurado.");
+    }
+
+    // Calculamos pago proporcional
+    const perMinute = incomeRole.incomePerHour / 60;
+    const payment = Math.round(perMinute * minutes);
+
+    // Añadir al banco
+    await User.findOneAndUpdate(
+      { userId, guildId },
+      { $inc: { bank: payment } },
+      { upsert: true }
+    );
+
+    await DutyStatus.deleteOne({ userId, guildId });
+
+    return safeReply(interaction, {
+      embeds: [
+        {
+          title: "🔴 Fin de servicio",
+          description: `Has trabajado **${minutes} minutos**.\n\nHas recibido **$${payment}** que fueron enviados a tu **banco**.`,
+          color: 0xe74c3c,
+        }
+      ]
+    });
+  }
 };

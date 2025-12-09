@@ -1,77 +1,66 @@
-// src/commands/rol/onduty.js
 const { SlashCommandBuilder } = require("discord.js");
+const { IncomeRole, DutyStatus } = require("@src/database/mongodb.js");
 const safeReply = require("@src/utils/safeReply.js");
-const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-const logger = require("@src/utils/logger.js");
-
-const { DutyStatus, IncomeRole, User } = require("@src/database/mongodb.js");
 
 module.exports = {
-    data: new SlashCommandBuilder()
-        .setName("onduty")
-        .setDescription("Ponte en servicio y empieza a generar ingresos."),
+  data: new SlashCommandBuilder()
+    .setName("onduty")
+    .setDescription("Entrar en servicio y comenzar a recibir salario."),
 
-    async execute(interaction) {
-        const guildId = interaction.guild.id;
-        const userId = interaction.user.id;
+  async execute(interaction) {
+    const user = interaction.user;
+    const guild = interaction.guild;
 
-        await interaction.deferReply({ ephemeral: false });
+    // ¿Ya está en servicio?
+    const existing = await DutyStatus.findOne({
+      userId: user.id,
+      guildId: guild.id,
+    });
 
-        // Ver si ya está en servicio
-        const existing = await DutyStatus.findOne({ userId, guildId });
-        if (existing) {
-            return safeReply(interaction, {
-                embeds: [
-                    new ThemedEmbed(interaction)
-                        .setTitle("⚠️ Ya estás en servicio")
-                        .setDescription("Debes usar `/offduty` antes de volver a entrar.")
-                        .setColor("#f1c40f")
-                ]
-            });
-        }
-
-        // Obtener roles configurados
-        const incomes = await IncomeRole.find({ guildId });
-
-        if (!incomes.length) {
-            return safeReply(interaction, {
-                content: "⚠️ No hay roles de salario configurados. Usa `/setincome` primero."
-            });
-        }
-
-        // Buscar roles que tenga el usuario y que tengan income configurado
-        const member = await interaction.guild.members.fetch(userId);
-
-        const validRoles = incomes.filter(inc => member.roles.cache.has(inc.roleId));
-
-        if (!validRoles.length) {
-            return safeReply(interaction, {
-                content: "❌ No tienes ningún rol con salario configurado."
-            });
-        }
-
-        // Escoger el rol con el mayor salario
-        const selectedRole = validRoles.sort((a, b) => b.incomePerHour - a.incomePerHour)[0];
-
-        // Guardar el estado DUTY
-        await DutyStatus.create({
-            userId,
-            guildId,
-            roleId: selectedRole.roleId,
-            startTime: new Date()
-        });
-
-        const embed = new ThemedEmbed(interaction)
-            .setTitle("🟢 Servicio iniciado")
-            .setDescription(
-                `Has entrado en servicio como <@&${selectedRole.roleId}>.\n\n` +
-                `**Salario:** $${selectedRole.incomePerHour}/hora`
-            )
-            .setColor("#2ecc71");
-
-        await safeReply(interaction, { embeds: [embed] });
-
-        logger.info(`${interaction.user.tag} ha iniciado servicio.`, "Duty");
-
+    if (existing) {
+      return safeReply(interaction, "⚠️ Ya estabas en servicio.");
     }
+
+    // Obtener roles del usuario
+    const member = await guild.members.fetch(user.id);
+    const roles = member.roles.cache.map(r => r.id);
+
+    // Buscar roles con salario
+    const incomeRoles = await IncomeRole.find({ guildId: guild.id });
+
+    const validRoles = incomeRoles
+      .filter(r => roles.includes(r.roleId))
+      .sort((a, b) => {
+        // Ordena según jerarquía más alta del servidor
+        const rankA = guild.roles.cache.get(a.roleId)?.position || 0;
+        const rankB = guild.roles.cache.get(b.roleId)?.position || 0;
+        return rankB - rankA;
+      });
+
+    if (validRoles.length === 0) {
+      return safeReply(interaction, "❌ Tu usuario no tiene ningún rol con salario configurado.");
+    }
+
+    const selectedRole = validRoles[0];
+
+    // Guardar estado
+    await DutyStatus.create({
+      userId: user.id,
+      guildId: guild.id,
+      roleId: selectedRole.roleId,
+      startTime: new Date(),
+      lastPayment: new Date(),
+      channelId: interaction.channel.id,
+    });
+
+    return safeReply(interaction, {
+      embeds: [
+        {
+          title: "🟢 En servicio",
+          description: `Has entrado en servicio como **<@&${selectedRole.roleId}>**.\nComenzarás a recibir pagos automáticos.`,
+          color: 0x2ecc71,
+        }
+      ]
+    });
+  }
 };
