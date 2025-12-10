@@ -1,9 +1,9 @@
+// src/structures/MyClient.js
 const { Client, GatewayIntentBits, Collection } = require("discord.js");
-require('module-alias/register'); // para aliases
+require('module-alias/register'); 
 const commandHandler = require("@handlers/commandHandler");
 const eventHandler = require("@handlers/eventHandler");
 const componentHandler = require("@handlers/componentHandler");
-const registerCommands = require("../../register.js"); // Ajusta según tu estructura
 
 class MyClient extends Client {
     constructor() {
@@ -17,14 +17,14 @@ class MyClient extends Client {
             partials: ['MESSAGE', 'CHANNEL', 'REACTION']
         });
 
-        // Inicializar colecciones
+        // Colecciones internas
         this.commands = new Collection();
         this.buttons = new Collection();
         this.selectMenus = new Collection();
         this.modals = new Collection();
         this.commandArray = [];
 
-        // Manejo global de errores
+        // Manejo de errores globales
         process.on("unhandledRejection", console.error);
         process.on("uncaughtException", console.error);
     }
@@ -42,15 +42,15 @@ class MyClient extends Client {
 
     async start() {
         try {
-            // Cargar handlers
+            // Activar handlers
             await this.loadHandlers();
 
-            // Login
+            // Login real del bot
             console.log("🔐 Iniciando sesión...");
             await this.login(process.env.DISCORD_TOKEN);
 
-            // Registrar comandos en Discord vía REST
-            await registerCommands(this);
+            // ❌ Esta línea era la que causaba el registro doble
+            // await registerCommands(this);
 
             console.log("✅ Bot iniciado correctamente");
         } catch (error) {

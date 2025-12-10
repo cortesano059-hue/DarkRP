@@ -1,12 +1,12 @@
 // src/commands/economia/items/inventario.js
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const safeReply = require("@safeReply");
 const eco = require("@economy");
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('inventario')
-        .setDescription('Muestra tu inventario o el de otro usuario.')
+        .setName("inventario")
+        .setDescription("Muestra tu inventario o el de otro usuario.")
         .addUserOption(option =>
             option
                 .setName("usuario")
@@ -31,15 +31,23 @@ module.exports = {
                     `📦 El inventario de **${targetUser.username}** está vacío.`
                 );
 
+            // Ordenar por nombre (más limpio visualmente)
+            items.sort((a, b) => a.itemName.localeCompare(b.itemName));
+
             const embed = new EmbedBuilder()
                 .setTitle(`📦 Inventario de ${targetUser.username}`)
-                .setColor("#3498DB");
+                .setColor("#3498DB")
+                .setFooter({ text: `Total items distintos: ${items.length}` });
 
             for (const item of items) {
                 embed.addFields({
-                    name: `${item.emoji} ${item.itemName}`,
-                    value: `Cantidad: **${item.amount}**\n${item.description || "Sin descripción"}`,
-                    inline: true
+                    name: `${item.emoji} ${item.itemName} × ${item.amount}`,
+                    value:
+                        `📝 ${item.description || "Sin descripción"}\n` +
+                        `💰 Precio: **${item.price}** | 📦 Tipo: **${item.type}**\n` +
+                        `🧪 Usable: **${item.usable ? "Sí" : "No"}** | 💸 Vendible: **${item.sellable ? "Sí" : "No"}**\n` +
+                        `📥 Inventariable: **${item.inventory ? "Sí" : "No"}**`,
+                    inline: false
                 });
             }
 

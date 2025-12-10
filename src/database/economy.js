@@ -4,7 +4,7 @@ const { User, Item, Inventory } = require("./mongodb.js");
 const logger = require("@logger");
 
 /* ========================================================================
-   SISTEMA DE ECONOMÍA COMPLETO
+   SISTEMA DE ECONOMÍA COMPLETO (REPARADO)
 =========================================================================== */
 
 module.exports = {
@@ -17,7 +17,7 @@ module.exports = {
     async getUser(userId, guildId) {
         if (!userId || !guildId) return null;
 
-        const user = await User.findOneAndUpdate(
+        return await User.findOneAndUpdate(
             { userId, guildId },
             {
                 $setOnInsert: {
@@ -32,8 +32,6 @@ module.exports = {
             },
             { new: true, upsert: true }
         );
-
-        return user;
     },
 
     async getBalance(userId, guildId) {
@@ -160,19 +158,23 @@ module.exports = {
         return user.daily_claim_at;
     },
 
+    async getWorkCooldown(userId, guildId) {
+        const user = await this.getUser(userId, guildId);
+        return user ? Number(user.work_cooldown) : 0;
+    },
+
     async setWorkCooldown(userId, guildId, timestamp) {
         const user = await this.getUser(userId, guildId);
         if (!user) return null;
 
         user.work_cooldown = Number(timestamp);
         await user.save();
-
         return user.work_cooldown;
     },
 
-    async getWorkCooldown(userId, guildId) {
+    async getTrashCooldown(userId, guildId) {
         const user = await this.getUser(userId, guildId);
-        return user ? Number(user.work_cooldown) : 0;
+        return user ? Number(user.trash_cooldown) : 0;
     },
 
     async setTrashCooldown(userId, guildId, timestamp) {
@@ -181,17 +183,11 @@ module.exports = {
 
         user.trash_cooldown = Number(timestamp);
         await user.save();
-
         return user.trash_cooldown;
     },
 
-    async getTrashCooldown(userId, guildId) {
-        const user = await this.getUser(userId, guildId);
-        return user ? Number(user.trash_cooldown) : 0;
-    },
-
     /* ========================================================================
-       ITEMS — SISTEMA COMPLETO
+       ITEMS — SISTEMA COMPLETO (NUEVO SISTEMA AVANZADO)
     ======================================================================== */
 
     async getItemByName(guildId, name) {
@@ -203,7 +199,11 @@ module.exports = {
         });
     },
 
-    async createItem(guildId, name, description, price, emoji, type = "misc") {
+    /* ------------------------------------------------------------------------
+       🔥 NUEVA FUNCIÓN createItem REPARADA  
+       Acepta config avanzada: inventory, usable, sellable, stock, requisitos…
+    ------------------------------------------------------------------------- */
+    async createItem(guildId, name, price, description, emoji, config = {}) {
         const exists = await Item.findOne({
             guildId,
             itemName: { $regex: `^${name}$`, $options: "i" },
@@ -214,10 +214,33 @@ module.exports = {
         const item = new Item({
             guildId,
             itemName: name,
-            description,
-            price,
-            emoji,
-            type,
+
+            // Campos básicos
+            price: Number(price) || 0,
+            description: description || "",
+            emoji: emoji || "📦",
+
+            // --- Muy importante ---
+            // YA NO se intenta guardar un objeto en "type".
+            type: "misc",
+
+            // Campos avanzados
+            inventory: config.inventory ?? true,
+            usable: config.usable ?? false,
+            sellable: config.sellable ?? true,
+
+            stock: config.stock ?? -1,
+            timeLimit: config.timeLimit ?? 0,
+
+            requirements: Array.isArray(config.requirements)
+                ? config.requirements
+                : [],
+
+            actions: Array.isArray(config.actions)
+                ? config.actions
+                : [],
+
+            data: config.data || {}
         });
 
         await item.save();
@@ -249,44 +272,49 @@ module.exports = {
         }));
     },
 
-    async addToInventory(userId, guildId, itemId, amount = 1) {
-        const slot = await Inventory.findOne({ userId, guildId, itemId });
+    async addToInventory(userId, guildId, itemName, amount = 1) {
+        const item = await this.getItemByName(guildId, itemName);
+        if (!item) return null;
+
+        const slot = await Inventory.findOne({
+            userId, guildId, itemId: item._id
+        });
 
         if (!slot) {
             return await Inventory.create({
                 userId,
                 guildId,
-                itemId,
+                itemId: item._id,
                 amount,
             });
         }
 
         slot.amount += amount;
         await slot.save();
-
         return slot;
     },
 
     async removeItem(userId, guildId, itemName, amount = 1) {
         const item = await this.getItemByName(guildId, itemName);
-        if (!item) return false;
+        if (!item) return { success: false };
 
         const slot = await Inventory.findOne({
             userId, guildId, itemId: item._id
         });
 
-        if (!slot || slot.amount < amount) return false;
+        if (!slot || slot.amount < amount)
+            return { success: false };
 
         slot.amount -= amount;
 
         if (slot.amount <= 0) await slot.deleteOne();
         else await slot.save();
 
-        return true;
+        return { success: true };
     },
 
     /* ========================================================================
-       TIENDA (SHOP)
+       TIENDA
     ======================================================================== */
 
     async getShop(guildId) {
