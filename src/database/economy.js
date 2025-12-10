@@ -1,204 +1,295 @@
 // src/database/economy.js
 require("dotenv").config();
-const { User, Item, Inventory, Backpack } = require("./mongodb.js");
-const logger = require("@logger"); // Para el log de transacciones
+const { User, Item, Inventory } = require("./mongodb.js");
+const logger = require("@logger");
+
+/* ========================================================================
+   SISTEMA DE ECONOMÍA COMPLETO
+=========================================================================== */
 
 module.exports = {
-  DAILY_COOLDOWN: 86400000, // 24 horas
+    DAILY_COOLDOWN: 86400000, // 24h
 
-  /* ==============================
-     OBTENER USUARIO
-  ============================== */
-  async getUser(userId, guildId) {
-    if (!userId || !guildId) return null;
+    /* ========================================================================
+       USUARIOS
+    ======================================================================== */
 
-    const user = await User.findOneAndUpdate(
-      { userId, guildId },
-      {
-        $setOnInsert: {
-          userId,
-          guildId,
-          money: 0,
-          bank: 5000,
-          daily_claim_at: 0,
-          work_cooldown: 0,
-          trash_cooldown: 0,
-        },
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+    async getUser(userId, guildId) {
+        if (!userId || !guildId) return null;
 
-    user.work_cooldown = Number(user.work_cooldown) || 0;
-    user.daily_claim_at = Number(user.daily_claim_at) || 0;
-    user.trash_cooldown = Number(user.trash_cooldown) || 0;
+        const user = await User.findOneAndUpdate(
+            { userId, guildId },
+            {
+                $setOnInsert: {
+                    userId,
+                    guildId,
+                    money: 0,
+                    bank: 5000,
+                    daily_claim_at: 0,
+                    work_cooldown: 0,
+                    trash_cooldown: 0,
+                }
+            },
+            { new: true, upsert: true }
+        );
 
-    await user.save();
+        return user;
+    },
 
-    return user;
-  },
+    async getBalance(userId, guildId) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return null;
 
-  /* ==============================
-     BALANCE
-  ============================== */
-  async getBalance(userId, guildId) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return null;
+        return {
+            money: user.money,
+            bank: user.bank,
+            dailyClaim: user.daily_claim_at,
+            workCooldown: user.work_cooldown,
+            trashCooldown: user.trash_cooldown,
+        };
+    },
 
-    return {
-      balance: user.money,
-      bank: user.bank,
-      dailyClaim: Number(user.daily_claim_at) || 0,
-      workCooldown: Number(user.work_cooldown) || 0,
-      trashCooldown: Number(user.trash_cooldown) || 0,
-    };
-  },
+    /* ========================================================================
+       DINERO
+    ======================================================================== */
 
-  /* ==============================
-     DINERO
-  ============================== */
-  async addMoney(userId, guildId, amount, from = 'system') {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return false;
+    async addMoney(userId, guildId, amount, from = "system") {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return false;
 
-    const finalAmount = Number(amount);
-    if (finalAmount <= 0) return false;
+        const finalAmount = Number(amount);
+        if (finalAmount <= 0) return false;
 
-    user.money += finalAmount;
-    await user.save();
-    
-    logger.logTransaction({ 
-        userId, 
-        guildId, 
-        type: from, 
-        amount: finalAmount, 
-        to: 'money' 
-    });
+        user.money += finalAmount;
+        await user.save();
 
-    return user.money;
-  },
+        logger.logTransaction({
+            userId,
+            guildId,
+            type: from,
+            amount: finalAmount,
+            to: "money",
+        });
 
-  async removeMoney(userId, guildId, amount, from = 'system') {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return { success: false, message: "Usuario no encontrado." };
+        return user.money;
+    },
 
-    const finalAmount = Number(amount);
+    async removeMoney(userId, guildId, amount, from = "system") {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return { success: false, message: "Usuario no encontrado." };
 
-    if (user.money < finalAmount)
-      return { success: false, message: "No tienes suficiente dinero." };
+        const finalAmount = Number(amount);
 
-    user.money -= finalAmount;
-    await user.save();
+        if (user.money < finalAmount)
+            return { success: false, message: "No tienes suficiente dinero." };
 
-    logger.logTransaction({ 
-        userId, 
-        guildId, 
-        type: from, 
-        amount: -finalAmount, 
-        from: 'money' 
-    });
+        user.money -= finalAmount;
+        await user.save();
 
-    return { success: true };
-  },
+        logger.logTransaction({
+            userId,
+            guildId,
+            type: from,
+            amount: -finalAmount,
+            from: "money",
+        });
 
-  async deposit(userId, guildId, amount) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return { success: false };
+        return { success: true };
+    },
 
-    const finalAmount = Number(amount);
+    async deposit(userId, guildId, amount) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return { success: false };
 
-    if (user.money < finalAmount)
-      return { success: false, message: "No tienes suficiente dinero." };
+        const finalAmount = Number(amount);
+        if (user.money < finalAmount)
+            return { success: false, message: "No tienes suficiente dinero." };
 
-    user.money -= finalAmount;
-    user.bank += finalAmount;
-    await user.save();
+        user.money -= finalAmount;
+        user.bank += finalAmount;
+        await user.save();
 
-    logger.logTransaction({ 
-        userId, 
-        guildId, 
-        type: 'deposit', 
-        amount: finalAmount, 
-        from: 'money', 
-        to: 'bank' 
-    });
+        logger.logTransaction({
+            userId,
+            guildId,
+            type: "deposit",
+            amount: finalAmount,
+            from: "money",
+            to: "bank",
+        });
 
-    return { success: true };
-  },
+        return { success: true };
+    },
 
-  async withdraw(userId, guildId, amount) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return { success: false };
+    async withdraw(userId, guildId, amount) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return { success: false };
 
-    const finalAmount = Number(amount);
+        const finalAmount = Number(amount);
 
-    if (user.bank < finalAmount)
-      return { success: false, message: "No tienes suficiente banco." };
+        if (user.bank < finalAmount)
+            return { success: false, message: "No tienes suficiente banco." };
 
-    user.bank -= finalAmount;
-    user.money += finalAmount;
-    await user.save();
+        user.bank -= finalAmount;
+        user.money += finalAmount;
+        await user.save();
 
-    logger.logTransaction({ 
-        userId, 
-        guildId, 
-        type: 'withdraw', 
-        amount: finalAmount, 
-        from: 'bank', 
-        to: 'money'
-    });
+        logger.logTransaction({
+            userId,
+            guildId,
+            type: "withdraw",
+            amount: finalAmount,
+            from: "bank",
+            to: "money",
+        });
 
-    return { success: true };
-  },
+        return { success: true };
+    },
 
-  /* ==============================
-     COOLDOWN DAILY / WORK
-  ============================== */
-  async claimDaily(userId, guildId) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return null;
+    /* ========================================================================
+       COOLDOWNS (daily, work, trash)
+    ======================================================================== */
 
-    user.daily_claim_at = Date.now();
-    await user.save();
-    return user.daily_claim_at;
-  },
+    async claimDaily(userId, guildId) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return null;
 
-  async setWorkCooldown(userId, guildId, timestamp) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return null;
+        user.daily_claim_at = Date.now();
+        await user.save();
 
-    const cleanTimestamp = Number(timestamp) || Date.now();
-    user.work_cooldown = cleanTimestamp;
-    await user.save();
+        return user.daily_claim_at;
+    },
 
-    return user.work_cooldown;
-  },
+    async setWorkCooldown(userId, guildId, timestamp) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return null;
 
-  async getWorkCooldown(userId, guildId) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return 0;
-    return Number(user.work_cooldown) || 0;
-  },
+        user.work_cooldown = Number(timestamp);
+        await user.save();
 
-  /* ==============================
-     COOLDOWN TRASH
-  ============================== */
-  async setTrashCooldown(userId, guildId, timestamp) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return null;
+        return user.work_cooldown;
+    },
 
-    const cleanTimestamp = Number(timestamp) || Date.now();
-    user.trash_cooldown = cleanTimestamp;
-    await user.save();
+    async getWorkCooldown(userId, guildId) {
+        const user = await this.getUser(userId, guildId);
+        return user ? Number(user.work_cooldown) : 0;
+    },
 
-    return user.trash_cooldown;
-  },
+    async setTrashCooldown(userId, guildId, timestamp) {
+        const user = await this.getUser(userId, guildId);
+        if (!user) return null;
 
-  async getTrashCooldown(userId, guildId) {
-    const user = await this.getUser(userId, guildId);
-    if (!user) return 0;
+        user.trash_cooldown = Number(timestamp);
+        await user.save();
 
-    return Number(user.trash_cooldown) || 0;
-  },
+        return user.trash_cooldown;
+    },
 
-  // Aquí seguirían tus funciones de inventario y tienda originales
+    async getTrashCooldown(userId, guildId) {
+        const user = await this.getUser(userId, guildId);
+        return user ? Number(user.trash_cooldown) : 0;
+    },
+
+    /* ========================================================================
+       ITEMS — SISTEMA COMPLETO
+    ======================================================================== */
+
+    async getItemByName(guildId, name) {
+        if (!name) return null;
+
+        return await Item.findOne({
+            guildId,
+            itemName: { $regex: `^${name}$`, $options: "i" },
+        });
+    },
+
+    async createItem(guildId, name, description, price, emoji, type = "misc") {
+        const exists = await Item.findOne({
+            guildId,
+            itemName: { $regex: `^${name}$`, $options: "i" },
+        });
+
+        if (exists) return null;
+
+        const item = new Item({
+            guildId,
+            itemName: name,
+            description,
+            price,
+            emoji,
+            type,
+        });
+
+        await item.save();
+        return item;
+    },
+
+    async deleteItem(guildId, name) {
+        const item = await this.getItemByName(guildId, name);
+        if (!item) return false;
+
+        await Inventory.deleteMany({ itemId: item._id });
+        await item.deleteOne();
+
+        return true;
+    },
+
+    /* ========================================================================
+       INVENTARIO
+    ======================================================================== */
+
+    async getUserInventory(userId, guildId) {
+        const data = await Inventory.find({ userId, guildId }).populate("itemId");
+
+        return data.map(entry => ({
+            itemName: entry.itemId.itemName,
+            description: entry.itemId.description,
+            emoji: entry.itemId.emoji,
+            amount: entry.amount,
+        }));
+    },
+
+    async addToInventory(userId, guildId, itemId, amount = 1) {
+        const slot = await Inventory.findOne({ userId, guildId, itemId });
+
+        if (!slot) {
+            return await Inventory.create({
+                userId,
+                guildId,
+                itemId,
+                amount,
+            });
+        }
+
+        slot.amount += amount;
+        await slot.save();
+
+        return slot;
+    },
+
+    async removeItem(userId, guildId, itemName, amount = 1) {
+        const item = await this.getItemByName(guildId, itemName);
+        if (!item) return false;
+
+        const slot = await Inventory.findOne({
+            userId, guildId, itemId: item._id
+        });
+
+        if (!slot || slot.amount < amount) return false;
+
+        slot.amount -= amount;
+
+        if (slot.amount <= 0) await slot.deleteOne();
+        else await slot.save();
+
+        return true;
+    },
+
+    /* ========================================================================
+       TIENDA (SHOP)
+    ======================================================================== */
+
+    async getShop(guildId) {
+        return await Item.find({ guildId }).sort({ price: 1 });
+    }
 };

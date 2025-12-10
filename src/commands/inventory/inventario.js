@@ -6,37 +6,48 @@ const eco = require("@economy");
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('inventario')
-        .setDescription('Muestra tu inventario'),
+        .setDescription('Muestra tu inventario o el de otro usuario.')
+        .addUserOption(option =>
+            option
+                .setName("usuario")
+                .setDescription("Usuario del que ver el inventario")
+        ),
 
     async execute(interaction) {
         await interaction.deferReply();
 
         try {
-            const userId = interaction.user.id;
+            const targetUser =
+                interaction.options.getUser("usuario") || interaction.user;
+
             const guildId = interaction.guild.id;
 
-            const items = await eco.getUserInventory(userId, guildId);
+            // Obtener inventario del usuario objetivo
+            const items = await eco.getUserInventory(targetUser.id, guildId);
 
             if (!items || items.length === 0)
-                return await safeReply(interaction, "📦 Tu inventario está vacío.");
+                return await safeReply(
+                    interaction,
+                    `📦 El inventario de **${targetUser.username}** está vacío.`
+                );
 
             const embed = new EmbedBuilder()
-                .setTitle("📦 Tu Inventario")
+                .setTitle(`📦 Inventario de ${targetUser.username}`)
                 .setColor("#3498DB");
 
             for (const item of items) {
                 embed.addFields({
-                    name: item.name,
+                    name: `${item.emoji} ${item.itemName}`,
                     value: `Cantidad: **${item.amount}**\n${item.description || "Sin descripción"}`,
                     inline: true
                 });
             }
 
-            await safeReply(interaction, { embeds: [embed] });
+            return await safeReply(interaction, { embeds: [embed] });
 
         } catch (err) {
             console.error("❌ Error en inventario:", err);
-            await safeReply(interaction, "❌ Error al mostrar tu inventario.");
+            return await safeReply(interaction, "❌ Error al mostrar el inventario.");
         }
     }
 };
