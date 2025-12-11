@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const safeReply = require("@src/utils/safeReply.js");
-const Dni = require("@database/mongodb");
+const { Dni } = require("@database/mongodb");
 
 module.exports = {
     data: new SlashCommandBuilder()

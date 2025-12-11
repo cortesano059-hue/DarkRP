@@ -28,7 +28,7 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        await interaction.deferReply();
+        await interaction.deferReply({ ephemeral: true });
 
         const sender = interaction.user;
         const receiver = interaction.options.getUser("usuario");
@@ -36,43 +36,61 @@ module.exports = {
         const method = interaction.options.getString("desde");
         const guildId = interaction.guild.id;
 
-        // Validaciones
         if (receiver.bot)
-            return safeReply(interaction, { content: "❌ No puedes pagar a bots." });
+            return safeReply(interaction, { content: "❌ No puedes pagar a bots.", ephemeral: true });
 
         if (receiver.id === sender.id)
-            return safeReply(interaction, { content: "❌ No puedes pagarte a ti mismo." });
+            return safeReply(interaction, { content: "❌ No puedes pagarte a ti mismo.", ephemeral: true });
 
         if (amount <= 0)
-            return safeReply(interaction, { content: "❌ La cantidad debe ser mayor a 0." });
+            return safeReply(interaction, { content: "❌ La cantidad debe ser mayor a 0.", ephemeral: true });
 
         const senderBal = await eco.getBalance(sender.id, guildId);
 
-        // Validar según método
-        if (method === "money" && senderBal.balance < amount)
-            return safeReply(interaction, { content: "❌ No tienes suficiente dinero en mano." });
+        /* ======================================================
+           VALIDACIONES
+        ====================================================== */
+        if (method === "money" && senderBal.money < amount)
+            return safeReply(interaction, { content: "❌ No tienes suficiente dinero en mano.", ephemeral: true });
 
         if (method === "bank" && senderBal.bank < amount)
-            return safeReply(interaction, { content: "❌ No tienes suficiente dinero en el banco." });
+            return safeReply(interaction, { content: "❌ No tienes suficiente dinero en el banco.", ephemeral: true });
 
-        // Transferencia
+        /* ======================================================
+           TRANSFERENCIA REAL SEGÚN MÉTODO
+        ====================================================== */
+
         if (method === "money") {
+            // RESTAMOS DE LA MANO DEL EMISOR
             await eco.removeMoney(sender.id, guildId, amount, "money");
+
+            // SUMAMOS A LA MANO DEL RECEPTOR
             await eco.addMoney(receiver.id, guildId, amount, "money");
-        } else {
-            await eco.removeMoney(sender.id, guildId, amount, "bank");
-            await eco.addMoney(receiver.id, guildId, amount, "money");
+
+        } else if (method === "bank") {
+            // SACAR DEL BANCO DEL EMISOR
+            const withdraw = await eco.withdraw(sender.id, guildId, amount);
+            if (!withdraw.success)
+                return safeReply(interaction, { content: "❌ Error al retirar del banco.", ephemeral: true });
+
+            // SUMAR AL BANCO DEL RECEPTOR
+            const receiverData = await eco.getUser(receiver.id, guildId);
+            receiverData.bank += amount;
+            await receiverData.save();
         }
 
-        // Saldos actualizados
+        /* ======================================================
+           RESULTADOS
+        ====================================================== */
+
         const newSender = await eco.getBalance(sender.id, guildId);
         const newReceiver = await eco.getBalance(receiver.id, guildId);
 
-        // Embed FINAL válido para Discord
         const embed = new ThemedEmbed(interaction)
             .setTitle("💸 Transferencia Exitosa")
             .setDescription(
-                `Has pagado **$${amount.toLocaleString()}** a ${receiver} desde **${method === "money" ? "tu cartera" : "tu banco"}**.`
+                `Has pagado **$${amount.toLocaleString()}** a ${receiver} desde **${method === "money" ? "tu cartera" : "tu banco"}**.\n` +
+                `📤 El dinero fue enviado al **${method === "money" ? "dinero en mano" : "banco"}** del receptor.`
             )
             .addFields(
                 {
@@ -81,11 +99,11 @@ module.exports = {
                 },
                 {
                     name: "Dinero en mano",
-                    value: `$${newSender.balance.toLocaleString()}`,
+                    value: `$${newSender.money.toLocaleString()}`,
                     inline: true
                 },
                 {
-                    name: "Dinero en banco",
+                    name: "Banco",
                     value: `$${newSender.bank.toLocaleString()}`,
                     inline: true
                 },
@@ -95,16 +113,16 @@ module.exports = {
                 },
                 {
                     name: "Dinero en mano",
-                    value: `$${newReceiver.balance.toLocaleString()}`,
+                    value: `$${newReceiver.money.toLocaleString()}`,
                     inline: true
                 },
                 {
-                    name: "Dinero en banco",
+                    name: "Banco",
                     value: `$${newReceiver.bank.toLocaleString()}`,
                     inline: true
                 }
             );
 
-        return safeReply(interaction, { embeds: [embed] });
+        return safeReply(interaction, { embeds: [embed], ephemeral: true });
     }
 };

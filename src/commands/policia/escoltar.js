@@ -1,28 +1,39 @@
 const { SlashCommandBuilder } = require('discord.js');
-const safeReply = require("@src/utils/safeReply.js");
+const eco = require("@economy");
+const safeReply = require("@safeReply");
 const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('escoltar')
-        .setDescription('Escoltar (agarrar) a un ciudadano.')
-        .addUserOption(o => o.setName('usuario').setDescription('Objetivo').setRequired(true)),
+        .setDescription('Escolta a un usuario.')
+        .addUserOption(option =>
+            option.setName('usuario')
+            .setDescription('Usuario a escoltar')
+            .setRequired(true)
+        ),
 
     async execute(interaction) {
-        await interaction.deferReply({ });
+        await interaction.deferReply();
 
-        try {
-            const target = interaction.options.getMember('usuario');
+        const policeRole = await eco.getPoliceRole(interaction.guild.id);
 
-            const embed = new ThemedEmbed(interaction)
-                .setTitle('👮 Procedimiento Policial')
-                .setDescription(`**${interaction.user.username}** está escoltando a **${target.username}**.`)
-                .setColor('#2c3e50');
+        if (!policeRole)
+            return safeReply(interaction, "⚠️ No se ha configurado el rol de policía.");
 
-            await safeReply(interaction, { embeds: [embed] });
-        } catch (err) {
-            console.error('❌ Error en escoltar.js:', err);
-            await safeReply(interaction, { content: '❌ Ocurrió un error al ejecutar el comando.' });
-        }
+        if (!interaction.member.roles.cache.has(policeRole))
+            return safeReply(interaction, `❌ Necesitas el rol <@&${policeRole}>.`);
+
+        const user = interaction.options.getMember("usuario");
+
+        if (!user)
+            return safeReply(interaction, "❌ Usuario no encontrado.");
+
+        const embed = ThemedEmbed.success(
+            "🚓 Escolta iniciada",
+            `${interaction.user.tag} ha comenzado a escoltar a ${user.user.tag}.`
+        );
+
+        return safeReply(interaction, { embeds: [embed] });
     }
 };

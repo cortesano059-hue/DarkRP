@@ -1,7 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const safeReply = require("@src/utils/safeReply.js");
-// CAMBIO 1: Importamos el Modelo de Mongoose en vez de 'supabase.js'
-const Dni = require("@database/mongodb"); 
+const { Dni } = require("@database/mongodb"); 
 
 module.exports = {
     data: new SlashCommandBuilder()

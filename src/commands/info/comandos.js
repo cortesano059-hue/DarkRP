@@ -15,22 +15,16 @@ const fs = require('fs');
 const path = require('path');
 const { version } = require('../../../package.json');
 
-// Banner superior
-const IMAGEN_SUPERIOR =
-    'https://cdn.discordapp.com/attachments/1438575452288581632/1445212702690508851/comandos.png';
-
-// Banner inferior
-const IMAGEN_INFERIOR =
-    'https://cdn.discordapp.com/attachments/1438575452288581632/1445213520194179163/Help__Comandos.png';
-
+// Banners
+const IMAGEN_SUPERIOR = 'https://cdn.discordapp.com/attachments/1438575452288581632/1445212702690508851/comandos.png';
+const IMAGEN_INFERIOR = 'https://cdn.discordapp.com/attachments/1438575452288581632/1445213520194179163/Help__Comandos.png';
 const COLOR_PRINCIPAL = '#2b2d31';
 
-// Función recursiva para obtener todos los archivos JS dentro de una carpeta
+// Obtener todos los archivos JS recursivamente
 const getAllFiles = (dir, arr = []) => {
     if (!fs.existsSync(dir)) return arr;
 
-    const files = fs.readdirSync(dir);
-    for (const file of files) {
+    for (const file of fs.readdirSync(dir)) {
         const full = path.join(dir, file);
 
         if (fs.statSync(full).isDirectory()) {
@@ -50,58 +44,73 @@ module.exports = {
     async execute(interaction, client) {
         await interaction.deferReply();
 
-        const helpData = getHelpMessage(client, interaction);
+        // 🔥 CUSTOM ID ÚNICO POR MENSAJE → FIX REAL
+        const menuId = `help-${interaction.id}`;
 
-        return safeReply(interaction, helpData);
+        const helpData = getHelpMessage(client, interaction, menuId);
+        const msg = await safeReply(interaction, helpData);
+
+        // Collector permanente (5m)
+        const collector = msg.createMessageComponentCollector({
+            time: 5 * 60_000
+        });
+
+        collector.on('collect', async select => {
+            if (select.user.id !== interaction.user.id) {
+                return select.reply({
+                    content: '❌ Solo quien ejecutó /comandos puede usar este menú.',
+                    ephemeral: true
+                });
+            }
+
+            const category = select.values[0];
+            const embeds = buildCategoryEmbeds(client, interaction, category);
+
+            await select.update({
+                embeds,
+                components: msg.components
+            });
+        });
+
+        collector.on('end', async () => {
+            if (!msg.editable) return;
+            msg.edit({ components: [] }).catch(() => {});
+        });
     }
 };
 
-function getHelpMessage(client, interaction) {
+
+// ===========================================================
+// MENÚ PRINCIPAL
+// ===========================================================
+function getHelpMessage(client, interaction, menuId) {
     const commandsRoot = path.join(__dirname, '../');
 
-    // Carpeta = categoría
-    const commandFolders = fs
-        .readdirSync(commandsRoot)
-        .filter((folder) => fs.statSync(path.join(commandsRoot, folder)).isDirectory());
+    const commandFolders = fs.readdirSync(commandsRoot)
+        .filter(folder => fs.statSync(path.join(commandsRoot, folder)).isDirectory());
 
     const commandCount = client.commandArray?.length ?? 0;
 
-    // Banner superior
     const embedBanner = new EmbedBuilder()
         .setImage(IMAGEN_SUPERIOR)
         .setColor(COLOR_PRINCIPAL);
 
-    // Embed principal
     const embedInfo = new ThemedEmbed()
         .setColor(COLOR_PRINCIPAL)
         .setTitle(`${Emojis.info} Menú de Ayuda`)
         .setDescription('Selecciona una categoría en el menú de abajo.')
         .addFields([
-            {
-                name: `${Emojis.gear} Comandos Totales`,
-                value: `> \`${commandCount}\``,
-                inline: true
-            },
-            {
-                name: `${Emojis.flechaderlong} Latencia`,
-                value: `> \`${Math.abs(client.ws.ping)}ms\``,
-                inline: true
-            },
-            {
-                name: `${Emojis.box} Versión`,
-                value: `> \`${version}\``,
-                inline: true
-            },
+            { name: `${Emojis.gear} Comandos Totales`, value: `> \`${commandCount}\``, inline: true },
+            { name: `${Emojis.flechaderlong} Latencia`, value: `> \`${Math.abs(client.ws.ping)}ms\``, inline: true },
+            { name: `${Emojis.box} Versión`, value: `> \`${version}\``, inline: true },
             {
                 name: `${Emojis.search} Categorías Disponibles`,
-                value:
-                    '>>> ' +
-                    commandFolders
-                        .map((folder) => {
-                            const cfg = Categories[folder] || Categories['Sin categoría'];
-                            return `${cfg.EMOJI} **${folder.toUpperCase()}**`;
-                        })
-                        .join('\n')
+                value: '>>> ' + commandFolders
+                    .map(folder => {
+                        const cfg = Categories[folder] || Categories['Sin categoría'];
+                        return `${cfg.EMOJI} **${folder.toUpperCase()}**`;
+                    })
+                    .join('\n')
             }
         ])
         .setThumbnail(client.user.displayAvatarURL())
@@ -111,13 +120,12 @@ function getHelpMessage(client, interaction) {
             iconURL: interaction.user.displayAvatarURL()
         });
 
-    // Menú desplegable
     const menuRow = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
-            .setCustomId(`help-category-${interaction.user.id}`)
+            .setCustomId(menuId) // 🔥 ID ÚNICO PARA EL SELECT
             .setPlaceholder('Selecciona una categoría')
             .addOptions(
-                commandFolders.map((folder) => {
+                commandFolders.map(folder => {
                     const cfg = Categories[folder] || Categories['Sin categoría'];
                     const folderPath = path.join(commandsRoot, folder);
                     const commandFiles = getAllFiles(folderPath);
@@ -135,7 +143,10 @@ function getHelpMessage(client, interaction) {
     return { embeds: [embedBanner, embedInfo], components: [menuRow] };
 }
 
-// Handler cuando seleccionas categoría
+
+// ===========================================================
+// EMBEDS POR CATEGORÍA
+// ===========================================================
 function buildCategoryEmbeds(client, interaction, category) {
     const dir = path.join(__dirname, '../', category);
 
@@ -144,48 +155,35 @@ function buildCategoryEmbeds(client, interaction, category) {
         .setColor(COLOR_PRINCIPAL);
 
     if (!fs.existsSync(dir)) {
-        const error = new ThemedEmbed()
-            .setColor(COLOR_PRINCIPAL)
-            .setTitle(`${Emojis.error} Error`)
-            .setDescription(`La categoría **${category.toUpperCase()}** no existe.`)
-            .setImage(IMAGEN_INFERIOR);
-
-        return [embedBanner, error];
+        return [
+            embedBanner,
+            new ThemedEmbed()
+                .setColor(COLOR_PRINCIPAL)
+                .setTitle(`${Emojis.error} Error`)
+                .setDescription(`La categoría **${category.toUpperCase()}** no existe.`)
+                .setImage(IMAGEN_INFERIOR)
+        ];
     }
 
     const files = getAllFiles(dir);
-
     const cfg = Categories[category] || Categories['Sin categoría'];
     const emoji = cfg?.EMOJI ?? Emojis.gear;
 
-    if (files.length === 0) {
-        const empty = new ThemedEmbed()
-            .setColor(COLOR_PRINCIPAL)
-            .setTitle(`${emoji} Categoría: ${category.toUpperCase()}`)
-            .setDescription('No hay comandos en esta categoría.')
-            .setImage(IMAGEN_INFERIOR);
+    const list = files.map(file => {
+        const base = path.basename(file);
+        const cmdName = base.replace('.js', '');
+        const cmd = client.commands.get(cmdName);
 
-        return [embedBanner, empty];
-    }
+        if (cmd?.data)
+            return `**${Emojis.flechaderlong} /${cmd.data.name}**\n> ${cmd.data.description}`;
 
-    const commandsList = files
-        .map((file) => {
-            const base = path.basename(file);
-            const cmdName = base.replace('.js', '');
-            const cmd = client.commands.get(cmdName);
-
-            if (cmd?.data) {
-                return `**${Emojis.flechaderlong} /${cmd.data.name}**\n> ${cmd.data.description}`;
-            }
-
-            return `**${Emojis.flechaderlong} ${cmdName}**\n> Sin descripción`;
-        })
-        .join('\n\n');
+        return `**${Emojis.flechaderlong} ${cmdName}**\n> Sin descripción`;
+    }).join('\n\n');
 
     const listEmbed = new ThemedEmbed()
         .setColor(COLOR_PRINCIPAL)
         .setTitle(`${emoji} Categoría: ${category.toUpperCase()}`)
-        .setDescription(commandsList)
+        .setDescription(list)
         .setThumbnail(client.user.displayAvatarURL())
         .setImage(IMAGEN_INFERIOR)
         .setFooter({

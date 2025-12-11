@@ -1,58 +1,61 @@
-// src/commands/economia/deposit.js
-const { SlashCommandBuilder } = require('discord.js');
-try {
-    const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-    const eco = require('@economy');
-    const safeReply = require("@src/utils/safeReply.js");
+const { SlashCommandBuilder } = require("discord.js");
+const eco = require("@economy");
+const safeReply = require("@src/utils/safeReply.js");
 
-    module.exports = {
-        data: new SlashCommandBuilder()
-            .setName('deposit')
-            .setDescription('Depositar dinero al banco.')
-            .addStringOption(o =>
-                o.setName('cantidad')
-                 .setDescription('Cantidad o "all" para todo')
-                 .setRequired(true)
-            ),
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName("deposit")
+        .setDescription("Deposita dinero en el banco.")
+        .addStringOption(option =>
+            option.setName("cantidad")
+                .setDescription("Cantidad o 'all'")
+                .setRequired(true)
+        ),
 
-        async execute(interaction) {
-            await interaction.deferReply({ ephemeral: false });
-            try {
-                let amount = interaction.options.getString('cantidad');
-                const balance = await eco.getBalance(interaction.user.id, interaction.guild.id);
+    async execute(interaction) {
+        await interaction.deferReply({ ephemeral: true });
 
-                if (amount.toLowerCase() === 'all') amount = balance.balance;
-                else amount = parseInt(amount);
+        const guildId = interaction.guild.id;
+        const userId = interaction.user.id;
 
-                if (!amount || amount <= 0) {
-                    return await safeReply(interaction, { embeds: [ThemedEmbed.error('Error', 'Cantidad inválida.')] });
-                }
+        const raw = interaction.options.getString("cantidad");
 
-                const result = await eco.deposit(interaction.user.id, interaction.guild.id, amount);
-                if (!result.success) {
-                    return await safeReply(interaction, { embeds: [ThemedEmbed.error('Error', result.message)] });
-                }
+        // Obtener balance
+        const bal = await eco.getBalance(userId, guildId);
+        if (!bal)
+            return safeReply(interaction, "❌ No se pudo obtener tu balance.", true);
 
-                const newBalance = await eco.getBalance(interaction.user.id, interaction.guild.id);
+        let amount;
 
-                const embed = new ThemedEmbed(interaction)
-                    .setTitle('🏦 Depósito Exitoso')
-                    .setColor('#2ecc71')
-                    .setDescription(`Has depositado **$${amount}** en tu banco.`)
-                    .addFields(
-                        { name: 'Usuario', value: `${interaction.user.tag}`, inline: true },
-                        { name: 'Dinero en mano', value: `$${newBalance.balance}`, inline: true },
-                        { name: 'Dinero en el banco', value: `$${newBalance.bank}`, inline: true }
-                    );
+        /* ============================================================
+           DETECCIÓN DE "ALL"
+        ============================================================ */
+        if (raw.toLowerCase() === "all") {
+            if (bal.money <= 0)
+                return safeReply(interaction, "❌ No tienes dinero en mano.", true);
 
-                return await safeReply(interaction, { embeds: [embed] });
-
-            } catch (err) {
-                console.error('❌ ERROR EN COMANDO deposit.js:', err);
-                return await safeReply(interaction, { embeds: [ThemedEmbed.error('Error', 'No se pudo depositar.')] });
-            }
+            amount = bal.money; // todo el dinero en mano
+        } else {
+            amount = Number(raw);
+            if (isNaN(amount) || amount <= 0)
+                return safeReply(interaction, "❌ Ingresa una cantidad válida.", true);
         }
-    };
-} catch (e) {
-    console.error('❌ ERROR EN COMANDO deposit.js:', e);
-}
+
+        /* ============================================================
+           PROCESAR DEPÓSITO
+        ============================================================ */
+        const result = await eco.deposit(userId, guildId, amount);
+
+        if (!result.success)
+            return safeReply(interaction, "❌ No tienes suficiente dinero en mano.", true);
+
+        const newBal = await eco.getBalance(userId, guildId);
+
+        return safeReply(interaction, {
+            content:
+                `🏦 Has depositado **$${amount.toLocaleString()}**.\n` +
+                `💵 Ahora tienes **$${newBal.money.toLocaleString()}** en mano.\n` +
+                `🏛️ Banco: **$${newBal.bank.toLocaleString()}**`
+        }, true);
+    }
+};

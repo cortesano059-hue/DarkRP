@@ -1,53 +1,43 @@
 const { SlashCommandBuilder } = require('discord.js');
 const safeReply = require("@src/utils/safeReply.js");
+const eco = require("@economy");
 const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('esposar')
-        .setDescription('Esposa a otro usuario.')
-        .addUserOption(option => 
+        .setDescription('Esposa a un usuario.')
+        .addUserOption(option =>
             option.setName('usuario')
-                  .setDescription('Usuario a esposar')
-                  .setRequired(true)
+            .setDescription('Usuario a esposar')
+            .setRequired(true)
         ),
 
     async execute(interaction) {
-        await interaction.deferReply({ ephemeral: false });
+        await interaction.deferReply();
 
-        if (!interaction.guild) {
-            return safeReply(interaction, { embeds: [ThemedEmbed.error('❌ Error', 'Este comando solo funciona en servidores.')] });
-        }
+        const guildId = interaction.guild.id;
+        const policeRole = await eco.getPoliceRole(guildId);
+
+        if (!policeRole)
+            return safeReply(interaction, "⚠️ No se ha configurado el rol de policía.");
+
+        if (!interaction.member.roles.cache.has(policeRole))
+            return safeReply(interaction, `❌ Necesitas el rol <@&${policeRole}>.`);
 
         const user = interaction.options.getMember('usuario');
 
-        if (!user) {
-            return safeReply(interaction, { embeds: [ThemedEmbed.error('❌ Error', 'Usuario no encontrado.')] });
-        }
+        if (!user)
+            return safeReply(interaction, "❌ Usuario no encontrado.");
 
-        let member = interaction.guild.members.cache.get(user.id);
-        if (!member) {
-            member = await interaction.guild.members.fetch(user.id).catch(() => null);
-        }
+        if (user.id === interaction.user.id)
+            return safeReply(interaction, "❌ No puedes esposarte a ti mismo.");
 
-        if (!member) {
-            return safeReply(interaction, { embeds: [ThemedEmbed.error('❌ Error', 'Usuario no está en este servidor.')] });
-        }
+        const embed = ThemedEmbed.success(
+            "🔒 Usuario esposado",
+            `${user.user.tag} ha sido esposado por ${interaction.user.tag}.`
+        );
 
-        if (user.id === interaction.user.id) {
-            return safeReply(interaction, { embeds: [ThemedEmbed.error('❌ Error', 'No puedes esposarte a ti mismo.')] });
-        }
-
-        const success = Math.random() > 0.2;
-
-        const embed = success 
-            ? ThemedEmbed.success('🔒 ¡Esposado!', `${member.user.tag} ha sido esposado por ${interaction.user.tag}.`)
-            : ThemedEmbed.error('❌ Intento fallido', `${interaction.user.tag} intentó esposar a ${member.user.tag}, pero falló.`);
-        
-        if (!success) embed.setColor('#95a5a6'); 
-        
-        embed.setTimestamp();
-
-        return safeReply(interaction, { embeds: [embed], flags: 0 });
+        return safeReply(interaction, { embeds: [embed] });
     }
 };

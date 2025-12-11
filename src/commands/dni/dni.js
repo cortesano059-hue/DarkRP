@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const Dni = require("@database/mongodb"); // Importamos el modelo
+const { Dni } = require("@database/mongodb"); // Importamos el modelo
 
 module.exports = {
     data: new SlashCommandBuilder()

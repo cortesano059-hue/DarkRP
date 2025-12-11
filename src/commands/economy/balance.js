@@ -1,48 +1,58 @@
-const { SlashCommandBuilder } = require('discord.js');
+// src/commands/economy/balance.js
+const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const safeReply = require("@safeReply");
+const eco = require("@economy");
 
-try {
-    const eco = require('@economy');
-    const safeReply = require("@src/utils/safeReply.js");
-    const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-
-    module.exports = {
-        data: new SlashCommandBuilder()
-            .setName('balance')
-            .setDescription('Ver tu dinero o el de otro usuario')
-            .addUserOption(o => o
-                .setName('usuario')
-                .setDescription('Usuario a consultar')
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName("balance")
+        .setDescription("Muestra tu balance o el de otro usuario.")
+        .addUserOption(o =>
+            o.setName("usuario")
+                .setDescription("Usuario (opcional)")
                 .setRequired(false)
-            ),
+        ),
 
-        async execute(interaction) {
-            // Defer reply usando flags actualizados
-            await interaction.deferReply({ ephemeral: false});
+    async execute(interaction) {
+        const user = interaction.options.getUser("usuario") || interaction.user;
+        const guildId = interaction.guild.id;
 
-            const user = interaction.options.getUser('usuario') || interaction.user;
-            const guildId = interaction.guild.id;
+        try {
+            const bal = await eco.getBalance(user.id, guildId);
 
-            try {
-                const balance = await eco.getBalance(user.id, guildId);
+            if (!bal)
+                return safeReply(interaction, "❌ No se pudo obtener el balance.");
 
-                const embed = new ThemedEmbed(interaction)
-                    .setTitle(`💰 Balance de ${user.tag}`)
-                    .setColor('#f1c40f')
-                    .addFields(
-                        { name: 'Dinero en Mano', value: `$${balance.balance}`, inline: true },
-                        { name: 'Dinero en Banco', value: `$${balance.bank}`, inline: true }
-                    );
+            // Valores seguros para evitar undefined
+            const money = Number(bal.money || 0);
+            const bank = Number(bal.bank || 0);
 
-                return await interaction.editReply({ embeds: [embed] });
-            } catch (err) {
-                console.error('❌ ERROR EN COMANDO balance.js:', err);
+            const embed = new EmbedBuilder()
+                .setTitle(`💰 Balance de ${user.username}`)
+                .setColor("#f1c40f")
+                .addFields(
+                    {
+                        name: "🪙 Dinero en mano",
+                        value: `${money.toLocaleString()}$`,
+                        inline: false
+                    },
+                    {
+                        name: "🏦 Banco",
+                        value: `${bank.toLocaleString()}$`,
+                        inline: false
+                    },
+                    {
+                        name: "💼 Total",
+                        value: `${(money + bank).toLocaleString()}$`,
+                        inline: false
+                    }
+                )
 
-                const errorEmbed = ThemedEmbed.error('Error', 'No se pudo obtener el balance.');
-                return await interaction.editReply({ embeds: [errorEmbed] });
-            }
+            return safeReply(interaction, { embeds: [embed] });
+
+        } catch (err) {
+            console.error("❌ Error en /balance:", err);
+            return safeReply(interaction, "❌ Ha ocurrido un error al obtener el balance.");
         }
-    };
-
-} catch (e) {
-    console.error('❌ ERROR EN COMANDO balance.js:', e);
-}
+    }
+};

@@ -1,88 +1,79 @@
-const { SlashCommandBuilder } = require('discord.js');
-const safeReply = require("@src/utils/safeReply.js");
-const ThemedEmbed = require("@src/utils/ThemedEmbed.js");
-const eco = require('@economy');
-const logger = require("@src/utils/logger.js"); // nuestro logger con webhook
-
-const COOLDOWN = 15000; // 15 segundos
-const cooldowns = new Map();
+// src/commands/economia/vender-mari.js
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
+const safeReply = require("@safeReply");
+const eco = require("@economy");
 
 module.exports = {
-  data: new SlashCommandBuilder()
-    .setName('vender-mari')
-    .setDescription('Vender mercancía ilegal.'),
+    data: new SlashCommandBuilder()
+        .setName("vendermari")
+        .setDescription("Vende marihuana (requiere rol ilegal y item configurado)."),
 
-  async execute(interaction) {
-    const userId = interaction.user.id;
-    const now = Date.now();
+    async execute(interaction) {
+        await interaction.deferReply();
 
-    // Cooldown
-    if (cooldowns.has(userId) && now - cooldowns.get(userId) < COOLDOWN) {
-      const remaining = ((COOLDOWN - (now - cooldowns.get(userId))) / 1000).toFixed(1);
-      return safeReply(interaction, { content: `⏱️ Debes esperar ${remaining}s antes de vender otra vez.` });
-    }
-    cooldowns.set(userId, now);
+        const guildId = interaction.guild.id;
+        const userId = interaction.user.id;
 
-    await interaction.deferReply();
+        /* ============================================================
+            1. Obtener configuración
+        ============================================================ */
+        const cfg = await eco.getMariConfig(guildId);
 
-    try {
-      const balanceData = await eco.getBalance(userId, interaction.guild.id);
-      const balance = balanceData.balance;
+        if (!cfg)
+            return safeReply(interaction, {
+                content: "❌ No se ha configurado la venta de marihuana. Usa `/config-mari`.",
+            });
 
-      // Riesgo base + extra riesgo según dinero
-      const baseRisk = 0.25;
-      const extraRisk = Math.min(balance / 50000, 0.2);
-      const finalRisk = baseRisk + extraRisk;
+        const { itemName, roleId, minConsume, maxConsume, minPrice, maxPrice } = cfg;
 
-      const chance = Math.random();
-      if (chance < finalRisk) {
-        // Fallo por policía
-        logger.warn(`[Vender-Mari] Usuario ${userId} fue atrapado por la policía y perdió la mercancía.`);
-        return safeReply(interaction, {
-          embeds: [
-            ThemedEmbed.error(
-              '🚨 ¡La policía!',
-              'Te han descubierto y perdiste la mercancía.'
-            )
-          ]
-        });
-      }
-
-      // Loot variable
-      const lootTable = [
-        { name: 'Pequeña cantidad de marihuana', min: 200, max: 400, chance: 0.5 },
-        { name: 'Paquete mediano', min: 400, max: 700, chance: 0.35 },
-        { name: 'Paquete grande', min: 700, max: 1200, chance: 0.15 }
-      ];
-
-      let cumulative = 0;
-      const lootRoll = Math.random();
-      let loot = lootTable[0];
-      for (const l of lootTable) {
-        cumulative += l.chance;
-        if (lootRoll < cumulative) {
-          loot = l;
-          break;
+        /* ============================================================
+            2. Comprobar rol ilegal
+        ============================================================ */
+        if (roleId && !interaction.member.roles.cache.has(roleId)) {
+            return safeReply(interaction, {
+                content: `❌ No tienes el rol ilegal requerido para vender. Debes tener: <@&${roleId}>`
+            });
         }
-      }
 
-      const earnings = Math.floor(Math.random() * (loot.max - loot.min + 1)) + loot.min;
-      await eco.addMoney(userId, interaction.guild.id, earnings);
+        /* ============================================================
+            3. Realizar venta
+        ============================================================ */
+        const result = await eco.sellMari(userId, guildId);
 
-      logger.info(`[Vender-Mari] Usuario ${userId} vendió ${loot.name} y ganó $${earnings}.`);
+        if (!result.success) {
+            return safeReply(interaction, {
+                content: `❌ ${result.message || "No se pudo completar la venta."}`
+            });
+        }
 
-      return safeReply(interaction, {
-        embeds: [
-          new ThemedEmbed(interaction)
-            .setTitle('🌿 Venta Exitosa')
-            .setColor('#2ecc71')
-            .setDescription(`Has vendido **${loot.name}** y ganado **$${earnings}**.`)
-        ]
-      });
+        /* ============================================================
+            4. Embed final
+        ============================================================ */
+        const embed = new EmbedBuilder()
+            .setTitle("🌿 Venta realizada con éxito")
+            .setColor("#2ecc71")
+            .setThumbnail(interaction.user.displayAvatarURL())
+            .setDescription(`Has vendido **${itemName}** en el mercado ilegal.`)
+            .addFields(
+                {
+                    name: "📦 Cantidad consumida",
+                    value: `${result.consume} unidades`,
+                    inline: true
+                },
+                {
+                    name: "💰 Precio por unidad",
+                    value: `${result.priceUnit}$`,
+                    inline: true
+                },
+                {
+                    name: "🤑 Ganancia total",
+                    value: `**${result.earn.toLocaleString()}$**`,
+                    inline: false
+                },
+            )
+            .setFooter({ text: "Mercado ilegal | DarkRP" })
+            .setTimestamp();
 
-    } catch (err) {
-      logger.error(`[Vender-Mari] Error ejecutando comando: ${err}`);
-      return safeReply(interaction, { content: '❌ Ocurrió un error al vender la mercancía.' });
+        return safeReply(interaction, { embeds: [embed] });
     }
-  }
 };
